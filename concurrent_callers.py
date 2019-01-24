@@ -37,6 +37,8 @@ def concurrent_call(fn, count=1, timeout=None, args=[], kwargs={}):
     while not done:
         exited, running = wait(futures, timeout=timeout, return_when=FIRST_COMPLETED)
         for f in exited:
+            if done:
+                break
             try:
                 result = f.result()
                 done = True
@@ -46,14 +48,15 @@ def concurrent_call(fn, count=1, timeout=None, args=[], kwargs={}):
                     futures = running
                 else:
                     done = True
-        if time.time() - start_time >= timeout:
-            result = TimeoutException()
+        if timeout and time.time() - start_time >= timeout:
+            exception = TimeoutException()
             done = True
     [f.cancel() for f in futures] # Attempt to cancel any unfinished functions
     try:
         return result
     except NameError:
-        return AllFailedException(exceptions)
+        exception = AllFailedException(exceptions)
+    raise exception
 
 
 class FunctionRace():
@@ -96,7 +99,9 @@ class FunctionRace():
         """
         self.contestants[fn] = {'args': args, 'kwargs': kwargs, 'count':count}
 
-    def get_contestant_count(self, contestants=self.contestants):
+    def get_contestant_count(self, contestants=None):
+        if not contestants:
+            contestants = self.contestants
         return sum([contestants[contestant]['count'] for contestant in contestants])
 
     def _homogenised_contestants(self):
@@ -105,7 +110,7 @@ class FunctionRace():
         them at the start blocks to ensure as fair a start as possible.
         """
         runners = self.contestants.copy()
-        while get_contestant_count(contestants=runners) > 0:
+        while self.get_contestant_count(contestants=runners) > 0:
             for runner in runners:
                 if runners[runner]['count']:
                     runners[runner]['count'] -= 1
@@ -128,12 +133,14 @@ class FunctionRace():
         """
         if self.futures:
             raise InProgress('Race currently underway.')
-        executor = ThreadPoolExecutor(max_workers=get_contestant_count())
+        if not self.contestants:
+            raise Exception('No Contestants to race! Try adding some...')
+        executor = ThreadPoolExecutor(max_workers=self.get_contestant_count())
         for fn, args, kwargs in self._homogenised_contestants():       
             future = executor.submit(fn, *args, **kwargs)
             future.__fname__ = fn.__name__
             future.__fargs__ = args
-            future.__fkwargs = kwargs
+            future.__fkwargs__ = kwargs
             self.futures.append(future)
         # Gather results as they come in
         exceptions = []
@@ -142,17 +149,20 @@ class FunctionRace():
         while not done:
             exited, running = wait(self.futures, timeout=self.timeout, return_when=FIRST_COMPLETED)
             for f in exited:
+                if done:
+                    break
                 try:
                     result = f.result()
-                    logger.info(f"We have a winner! Name: {f.__fname__}, args: {f.__fargs__}, kwargs: {f.__fkwargs__}")
+                    self.logger.info(f"We have a winner! Name: {f.__fname__}, args: {f.__fargs__}, kwargs: {f.__fkwargs__}")
                     done = True
                 except Exception as e:
+                    print(e)
                     exceptions.append(e)
                     if running:
                         self.futures = running
                     else:
                         done = True
-            if time.time() - start_time >= self.timeout:
+            if self.timeout and time.time() - start_time >= self.timeout:
                 result = TimeoutException()
                 done = True
         if self.do_cleanup:
@@ -175,6 +185,7 @@ class FunctionRace():
         be returned.
         Raises InProgress Exception if a cleanup is currently underway.
         """
+        self.logger.debug("Starting Cleanup...")
         if self.cleaning:
             raise InProgress('Cleanup currently underway.')
         def killall(self, timeout):
