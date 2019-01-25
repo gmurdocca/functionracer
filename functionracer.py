@@ -54,7 +54,7 @@ class FunctionRacer():
         for function_spec in functions:
             self.add_function(*function_spec)
 
-    def add_fucntion(self, fn, args=[], kwargs={}, count=1):
+    def add_function(self, fn, args=[], kwargs={}, count=1):
         """
         Adds a new contestant function that will compete for shortest runtime.
         `count` number of functions will be added to the start gates in this race.
