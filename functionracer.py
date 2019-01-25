@@ -15,52 +15,10 @@ class AllFailedException(Exception):
 class InProgress(Exception):
     pass
 
-def concurrent_call(fn, count=1, timeout=None, args=[], kwargs={}):
-    """
-    Calls `count` concurrent instances of function `fn`, passing args and kwargs as follows:
-    
-        fn(*args, **kwargs)
+class CleanupFailed(Exception):
+    pass
 
-    Note: Assumes `fn` is idempotent.
-
-    Waits for the first call that returns without raising an exception and returns its result.
-    If all calls raise an Exception, returns AllFailedException containing a list of all the Exceptions.
-    If all calls do not finish within `timeout` seconds, return TimeoutException, else wait indefinitely.
-    """
-    executor = ThreadPoolExecutor(max_workers=count)
-    futures = []
-    for i in range(count):       
-        future = executor.submit(fn, *args, **kwargs)
-        futures.append(future)
-    exceptions = []
-    done = False
-    start_time = time.time()
-    while not done:
-        exited, running = wait(futures, timeout=timeout, return_when=FIRST_COMPLETED)
-        for f in exited:
-            if done:
-                break
-            try:
-                result = f.result()
-                done = True
-            except Exception as e:
-                exceptions.append(e)
-                if running:
-                    futures = running
-                else:
-                    done = True
-        if timeout and time.time() - start_time >= timeout:
-            exception = TimeoutException()
-            done = True
-    [f.cancel() for f in futures] # Attempt to cancel any unfinished functions
-    try:
-        return result
-    except NameError:
-        exception = AllFailedException(exceptions)
-    raise exception
-
-
-class FunctionRace():
+class FunctionRacer():
 
     """
     A Class that represents a race meet for Python functions. Supports adding 
@@ -157,7 +115,7 @@ class FunctionRace():
                     break
                 try:
                     result = f.result()
-                    self.logger.info(f"We have a winner! Name: {f.__fname__}, args: {f.__fargs__}, kwargs: {f.__fkwargs__}")
+                    self.logger.debug(f"We have a winner! Name: {f.__fname__}, args: {f.__fargs__}, kwargs: {f.__fkwargs__}")
                     done = True
                 except Exception as e:
                     exceptions.append(e)
@@ -195,11 +153,16 @@ class FunctionRace():
         if self.cleaning:
             raise InProgress('Cleanup currently underway.')
         def cleanall(self, timeout):
+            self.cleaning = True
+            self.logger.debug(f"Running with cleanup timeout: {timeout}")
             while self.is_running():
                 exited, running = wait(self.futures, timeout=timeout, return_when=ALL_COMPLETED)
                 self.futures = list(running)
+                if running:
+                    final_cleanall_thread = threading.Thread(target=cleanall, args=(self, None))
+                    final_cleanall_thread.start()
+                    raise CleanupFailed(f"Not all functions returned within timeout={timeout} seconds")
             self.cleaning = False
-        self.cleaning = True
         cleanall_thread = threading.Thread(target=cleanall, args=(self, timeout))
         cleanall_thread.start()
 
