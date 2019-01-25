@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, ALL_COMPLETE
 import threading
 import logging
 import time
+import copy
 
 
 class TimeoutException(Exception):
@@ -65,29 +66,32 @@ class FunctionRace():
     A Class that represents a race meet for Python functions. Supports adding 
     functions (contestants) and their arguments, running the race, collecting
     results from the winner (ie. the function that returns soonest) and cleanup
-    after the race is over (killing any unfinished functions).
+    after the race is over (waiting for any unfinished functions to exit).
 
     Accepts a list of contestant functions and their arguments that will be called 
     in parallel and compete for shortest execution time.
 
     Each contestant can be any Python function, added via the constructor or via
-    `self.add_function`. Any mix of the same function or different functions can
-    be added to the race. The list of contestant functions can be edited directly
-    before the race starts via self.contestants
+    `self.add_function`. The list of contestant functions can be edited directly
+    before the race starts via `self.contestants`.
     
     Functions must be idempotent or their effect will be multiplied `count` times
-    as specified in `add_function`. 
+    as specified as a parameter in the `add_function` method.
+    
+    The `start` method will return the result of the first function to exit without
+    raising an Exception.  Note that the main Python thread will not exit (eg via 
+    sys.exit() or at the end of execution) until all competitors have returned, or
+    until os._exit(n) is called. See the following doc regarding os._exit(n):
+    https://docs.python.org/2/library/os.html#os._exit
     """
 
     contestants = {}
-    timeout = None
     futures = []
     cleaning = False
-    do_cleanup=True
 
-    def __init__(self, functions=[], timeout=None, do_cleanup=True):
+    def __init__(self, functions=[], timeout=None, cleanup_timeout=5):
         self.timeout = timeout
-        self.do_cleanup = do_cleanup
+        self.cleanup_timeout = cleanup_timeout
         self.logger = logging.getLogger()
         for function_spec in functions:
             self.add_function(*function_spec)
@@ -109,7 +113,7 @@ class FunctionRace():
         A generator that yields a homogenous mix of contestants, used for ordering
         them at the start blocks to ensure as fair a start as possible.
         """
-        runners = self.contestants.copy()
+        runners = copy.deepcopy(self.contestants)
         while self.get_contestant_count(contestants=runners) > 0:
             for runner in runners:
                 if runners[runner]['count']:
@@ -131,7 +135,7 @@ class FunctionRace():
 
         Raises InProgress exception if a race is already under way.
         """
-        if self.futures:
+        if self.is_running():
             raise InProgress('Race currently underway.')
         if not self.contestants:
             raise Exception('No Contestants to race! Try adding some...')
@@ -156,51 +160,46 @@ class FunctionRace():
                     self.logger.info(f"We have a winner! Name: {f.__fname__}, args: {f.__fargs__}, kwargs: {f.__fkwargs__}")
                     done = True
                 except Exception as e:
-                    print(e)
                     exceptions.append(e)
                     if running:
-                        self.futures = running
+                        self.futures = list(running)
                     else:
                         done = True
             if self.timeout and time.time() - start_time >= self.timeout:
-                result = TimeoutException()
+                exception = TimeoutException()
                 done = True
-        if self.do_cleanup:
-            self.clean()
+        self.clean(timeout=self.cleanup_timeout)
         try:
             return result
         except NameError:
-            return AllFailedException(exceptions)
+            exception = AllFailedException(exceptions)
+        raise exception
 
     def is_running(self):
         return self.futures and True or False
 
-    def clean(self, background=True, timeout=None):
+    def clean(self, timeout=None):
         """
-        Attempt to cancel any unfinished functions, effectively resetting the race.
-        If background=True, return before cleanup is completed, else block until then.
-        Completion of backgrounded cleanup operation can be checked by polling self.is_running().
-        Wait `timeout` seconds if provided before returning, else block indefinitely.
-        If there are still running contestents after timeout expiry, a list of them will
-        be returned.
-        Raises InProgress Exception if a cleanup is currently underway.
+        Background worker thread that Waits `timeout` seconds (or indefinitely if None)
+        for any non-winners to return.
+
+        Note that the main Python thread will not exit until this thread returns, ie
+        until all competitors have returned. You can forcibly exit main thread by calling
+        os._exit(n). See the following doc regarding os._exit(n):
+        https://docs.python.org/2/library/os.html#os._exit
+
+        Raises CleanupFailed exception if `timeout` seconds is exceeded.
+        Raises InProgress exception if a cleanup is currently underway.
         """
         self.logger.debug("Starting Cleanup...")
         if self.cleaning:
             raise InProgress('Cleanup currently underway.')
-        def killall(self, timeout):
-            [f.cancel() for f in self.futures]
+        def cleanall(self, timeout):
             while self.is_running():
                 exited, running = wait(self.futures, timeout=timeout, return_when=ALL_COMPLETED)
-                self.futures = running
+                self.futures = list(running)
             self.cleaning = False
-            return self.futures or None
-
         self.cleaning = True
-        if background:
-            killall_thread = threading.Thread(target=killall, args=(self, timeout))
-            killall_thread.start()
-        else:
-            return killall(self, timeout)
-
+        cleanall_thread = threading.Thread(target=cleanall, args=(self, timeout))
+        cleanall_thread.start()
 
