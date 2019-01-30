@@ -39,7 +39,7 @@ def fakefunk(*args, **kwargs):
 
 if __name__ == "__main__":
     #f = functionracer.FunctionRacer(functions=[(phonyworker, [1, 10], {'exception_probability': .7}, 3), ])
-    fr = functionracer.FunctionRacer(cleanup_timeout=2)
+    fr = functionracer.FunctionRacer(timeout=1, cleanup_wait=False, cleanup_timeout=2)
     fr.add_function(phonyworker, args=[1, 10], kwargs={'exception_probability': .7}, count=3)
     fr.add_function(fakefunk, args=[1, 10], kwargs={'exception_probability': .7}, count=3)
     repeat_race = 3 # repeat the race 3 times
@@ -56,10 +56,10 @@ if __name__ == "__main__":
         if i == repeat_race - 1:
             # This is the last race
             print("That was the last race, forcibly exiting (not waiting for non-winners to return) by calling os._exit(0)")
-            os._exit(0)
+            #os._exit(0)
         else:
-            print("Awaiting contestant functions to finish...")
+            print("Awaiting contestant functions to finish (unless we set cleanup_wait=False)...")
             while fr.is_running():
                 time.sleep(1)
-            print("All contestant functions are returned, the race is over.")
+            print("All contestant functions are returned (or we skipped the check with cleanup_wait=False), the race is over.")
 

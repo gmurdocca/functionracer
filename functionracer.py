@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, ALL_COMPLETED, wait
+from concurrent.futures.thread import _python_exit
 import threading
 import logging
 import time
@@ -23,8 +24,8 @@ class FunctionRacer():
     """
     A Class that represents a race meet for Python functions. Supports adding 
     functions (contestants) and their arguments, running the race, collecting
-    results from the winner (ie. the function that returns soonest) and cleanup
-    after the race is over (waiting for any unfinished functions to exit).
+    results from the winner (ie. the function that returns soonest) and optional
+    cleanup after the race is over (waiting for any unfinished functions to exit).
 
     Accepts a list of contestant functions and their arguments that will be called 
     in parallel and compete for shortest execution time.
@@ -37,9 +38,23 @@ class FunctionRacer():
     as specified as a parameter in the `add_function` method.
     
     The `start` method will return the result of the first function to exit without
-    raising an Exception.  Note that the main Python thread will not exit (eg via 
-    sys.exit() or at the end of execution) until all competitors have returned, or
-    until os._exit(n) is called. See the following doc regarding os._exit(n):
+    raising an Exception. Once the `start` method returns, cleanup begins.
+
+    If all function calls do not finish within `timeout` seconds,TimeoutException
+    will be raised, else wait indefinitely if `timeout` is None (default).
+    
+    If cleanup_wait=True, the main Python thread will not exit (eg. via sys.exit()
+    or at the end of execution) until all competitors have returned, or until
+    os._exit(n) is called. If `cleanup_timeout` seconds elapse during cleanup, an
+    CleanupFailed exception is raised, however the main Python thread will continue
+    running until all compeditors exit.
+    
+    If cleanup_wait=False or if os._exit(n) is used, the main Python thread will
+    exit even if compeditors have not yet completed running. Note this may have
+    dangerous effects as unfinished (non-winning) compeditor functions will be
+    killed mid-execution.
+    
+    See the following doc regarding os._exit(n):
     https://docs.python.org/2/library/os.html#os._exit
     """
 
@@ -47,9 +62,17 @@ class FunctionRacer():
     futures = []
     cleaning = False
 
-    def __init__(self, functions=[], timeout=None, cleanup_timeout=5):
-        self.timeout = timeout
+    def __init__(self, functions=[], timeout=None, cleanup_wait=True, cleanup_timeout=5):
+        try:
+            assert(cleanup_timeout >= 0)
+        except AssertionError:
+            raise AssertionError("cleanup_timeout must be >= 0")
+        self.timeout = tiout
+        self.cleanup_wait = cleanup_wait
         self.cleanup_timeout = cleanup_timeout
+        if not cleanup_wait:
+            import atexit
+            atexit.unregister(_python_exit)
         self.logger = logging.getLogger()
         for function_spec in functions:
             self.add_function(*function_spec)
@@ -124,9 +147,9 @@ class FunctionRacer():
                     else:
                         done = True
             if self.timeout and time.time() - start_time >= self.timeout:
-                exception = TimeoutException()
+                exception = TimeoutException(f"Some functions failed to return in {self.timeout} seconds.")
                 done = True
-        self.clean(timeout=self.cleanup_timeout)
+        self.clean(cleanup_wait=self.cleanup_wait, cleanup_timeout=self.cleanup_timeout)
         try:
             return result
         except NameError:
@@ -136,33 +159,40 @@ class FunctionRacer():
     def is_running(self):
         return self.futures and True or False
 
-    def clean(self, timeout=None):
+    def clean(self, cleanup_wait=True, cleanup_timeout=None):
         """
-        Background worker thread that Waits `timeout` seconds (or indefinitely if None)
+        Spawns a background worker thread that Waits `timeout` seconds (or indefinitely if None)
         for any non-winners to return.
 
-        Note that the main Python thread will not exit until this thread returns, ie
+        If cleanup_wait=True, the main Python thread will not exit until this thread returns, ie
         until all competitors have returned. You can forcibly exit main thread by calling
         os._exit(n). See the following doc regarding os._exit(n):
         https://docs.python.org/2/library/os.html#os._exit
+        
+        Note that setting cleanup_wait=False or using os._exit() is dangerous as unfinished (non-winning)
+        functions will be killed mid-execution.
 
         Raises CleanupFailed exception if `timeout` seconds is exceeded.
         Raises InProgress exception if a cleanup is currently underway.
         """
-        self.logger.debug("Starting Cleanup...")
+        self.logger.debug(f"Starting clean(cleanup_wait={cleanup_wait}, cleanup_timeout={cleanup_timeout})...")
         if self.cleaning:
             raise InProgress('Cleanup currently underway.')
-        def cleanall(self, timeout):
+        def cleanall(self, cleanup_wait, cleanup_timeout):
+            self.logger.debug(f"Starting cleanall(cleanup_wait={cleanup_wait}, cleanup_timeout={cleanup_timeout})...")
             self.cleaning = True
-            self.logger.debug(f"Running with cleanup timeout: {timeout}")
-            while self.is_running():
-                exited, running = wait(self.futures, timeout=timeout, return_when=ALL_COMPLETED)
-                self.futures = list(running)
-                if running:
-                    final_cleanall_thread = threading.Thread(target=cleanall, args=(self, None))
-                    final_cleanall_thread.start()
-                    raise CleanupFailed(f"Not all functions returned within timeout={timeout} seconds")
+            if cleanup_wait:
+                while self.is_running():
+                    exited, running = wait(self.futures, timeout=cleanup_timeout, return_when=ALL_COMPLETED)
+                    self.futures = list(running)
+                    if running:
+                        final_cleanall_thread = threading.Thread(target=cleanall, args=(self, cleanup_wait, None))
+                        final_cleanall_thread.start()
+                        raise CleanupFailed(f"{len(self.futures)} functions failed to return within timeout={cleanup_timeout} seconds")
+            else:
+                # we deregistered the atexit callback call to thread.join(), just reinit our futures list.
+                self.futures = []
             self.cleaning = False
-        cleanall_thread = threading.Thread(target=cleanall, args=(self, timeout))
+        cleanall_thread = threading.Thread(target=cleanall, args=(self, cleanup_wait, cleanup_timeout))
         cleanall_thread.start()
 
