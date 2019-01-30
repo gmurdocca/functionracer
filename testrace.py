@@ -38,8 +38,9 @@ def fakefunk(*args, **kwargs):
 ##########################################
 
 if __name__ == "__main__":
-    #f = functionracer.FunctionRacer(functions=[(phonyworker, [1, 10], {'exception_probability': .7}, 3), ])
-    fr = functionracer.FunctionRacer(timeout=1, cleanup_wait=True, cleanup_timeout=2)
+    #fr = functionracer.FunctionRacer(functions=[(phonyworker, [1, 10], {'exception_probability': .7}, 3), ])
+    #fr = functionracer.FunctionRacer(timeout=1, cleanup_wait=True, cleanup_timeout=2)
+    fr = functionracer.FunctionRacer(cleanup_wait=False)
     fr.add_function(phonyworker, args=[1, 10], kwargs={'exception_probability': .7}, count=3)
     fr.add_function(fakefunk, args=[1, 10], kwargs={'exception_probability': .7}, count=3)
     repeat_race = 3 # repeat the race 3 times
