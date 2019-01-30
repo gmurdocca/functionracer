@@ -40,8 +40,8 @@ class FunctionRacer():
     The `start` method will return the result of the first function to exit without
     raising an Exception. Once the `start` method returns, cleanup begins.
 
-    If all function calls do not finish within `timeout` seconds,TimeoutException
-    will be raised, else wait indefinitely if `timeout` is None (default).
+    If no function call finishes within `timeout` seconds, TimeoutException will
+    be raised, else wait indefinitely if `timeout` is None (default).
     
     If cleanup_wait=True, the main Python thread will not exit (eg. via sys.exit()
     or at the end of execution) until all competitors have returned, or until
@@ -67,7 +67,7 @@ class FunctionRacer():
             assert(cleanup_timeout >= 0)
         except AssertionError:
             raise AssertionError("cleanup_timeout must be >= 0")
-        self.timeout = tiout
+        self.timeout = timeout
         self.cleanup_wait = cleanup_wait
         self.cleanup_timeout = cleanup_timeout
         if not cleanup_wait:
@@ -111,8 +111,8 @@ class FunctionRacer():
         If all function calls raise an Exception, returns AllFailedException containing
         a list of all the Exceptions.
 
-        If all function calls do not finish within `self.timeout` seconds, return
-        TimeoutException, else wait indefinitely.
+        If no function call finishes within `self.timeout` seconds, return TimeoutException,
+        else wait indefinitely.
 
         Raises InProgress exception if a race is already under way.
         """
@@ -129,6 +129,7 @@ class FunctionRacer():
             self.futures.append(future)
         # Gather results as they come in
         exceptions = []
+        exception = None
         done = False
         start_time = time.time()
         while not done:
@@ -146,14 +147,16 @@ class FunctionRacer():
                         self.futures = list(running)
                     else:
                         done = True
+            self.logger.debug(f"self.timeout={self.timeout}, start_time={start_time}, current_time={time.time()} delta = {time.time() - start_time}")
             if self.timeout and time.time() - start_time >= self.timeout:
-                exception = TimeoutException(f"Some functions failed to return in {self.timeout} seconds.")
+                exception = TimeoutException(f"No functions returned within {self.timeout} seconds.")
                 done = True
         self.clean(cleanup_wait=self.cleanup_wait, cleanup_timeout=self.cleanup_timeout)
         try:
             return result
         except NameError:
-            exception = AllFailedException(exceptions)
+            if not exception:
+                exception = AllFailedException(exceptions)
         raise exception
 
     def is_running(self):
