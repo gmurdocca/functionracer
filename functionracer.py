@@ -1,8 +1,9 @@
-#!/usr/bin/env python
+#!/usr/b
 from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, ALL_COMPLETED, wait
 from concurrent.futures.thread import _python_exit
 import threading
 import logging
+import atexit
 import time
 import copy
 
@@ -53,6 +54,11 @@ class FunctionRacer():
     exit even if compeditors have not yet completed running. Note this may have
     dangerous effects as unfinished (non-winning) compeditor functions will be
     killed mid-execution.
+
+    Note: Because cleanup_wait applies to the entire Python interpreter, it is set
+    globally. If you have multiple instances of the FunctionRacer class, the state
+    of cleanup_wait for all instances will be set to what ever it was last set to.
+    It can be set via the constructor, or via the `set_cleanp_wait` method.
     
     See the following doc regarding os._exit(n):
     https://docs.python.org/2/library/os.html#os._exit
@@ -61,21 +67,27 @@ class FunctionRacer():
     contestants = {}
     futures = []
     cleaning = False
+    cleanup_wait = True
 
     def __init__(self, functions=[], timeout=None, cleanup_wait=True, cleanup_timeout=5):
-        try:
-            assert(cleanup_timeout >= 0)
-        except AssertionError:
-            raise AssertionError("cleanup_timeout must be >= 0")
+        assert(cleanup_timeout >= 0)
         self.timeout = timeout
-        self.cleanup_wait = cleanup_wait
         self.cleanup_timeout = cleanup_timeout
-        if not cleanup_wait:
-            import atexit
-            atexit.unregister(_python_exit)
+        self.set_cleanup_wait(cleanup_wait)
         self.logger = logging.getLogger()
         for function_spec in functions:
             self.add_function(*function_spec)
+
+    def set_cleanup_wait(self, desired_state):
+        cls = self.__class__
+        assert(type(desired_state) == bool)
+        current_state = cls.cleanup_wait
+        if not current_state == desired_state:
+            if desired_state == True:
+                atexit.register(_python_exit)
+            else:
+                atexit.unregister(_python_exit)
+            cls.cleanup_wait = desired_state
 
     def add_function(self, fn, args=[], kwargs={}, count=1):
         """
