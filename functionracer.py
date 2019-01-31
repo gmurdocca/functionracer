@@ -41,6 +41,20 @@ class FunctionRacer():
     The `start` method will return the result of the first function to exit without
     raising an Exception. Once the `start` method returns, cleanup begins.
 
+    The `results` attribute contains a list of concurrent.futures.Future objects,
+    each representing a competitor, in order of race position as they finish. Each
+    future will have the following extra attributes to those documented:
+
+            future.start_time  - the start time in secs since epoch of the function
+            future.end_time    - the end time in secs since epoch of the function
+            future.duration    - the duration of the function in seconds
+            future.__fname__   - the name of the python function (race competitor)
+            future.__fargs__   - a list of args passed to the function
+            future.__fkwargs__ - a dict of keyword args passed to the function
+
+    See here for documentation about concurrent.futures.Future objects:
+    https://docs.python.org/3/library/concurrent.futures.html#future-objects
+
     If no function call finishes within `timeout` seconds, TimeoutException will
     be raised, else wait indefinitely if `timeout` is None (default).
     
@@ -66,6 +80,7 @@ class FunctionRacer():
 
     contestants = {}
     futures = []
+    results = []
     cleaning = False
     cleanup_wait = True
 
@@ -94,7 +109,7 @@ class FunctionRacer():
         Adds a new contestant function that will compete for shortest runtime.
         `count` number of functions will be added to the start gates in this race.
         """
-        self.contestants[fn] = {'args': args, 'kwargs': kwargs, 'count':count}
+        self.contestants[fn] = {'args': args, 'kwargs': kwargs, 'count': count}
 
     def get_contestant_count(self, contestants=None):
         if not contestants:
@@ -113,6 +128,15 @@ class FunctionRacer():
                     runners[runner]['count'] -= 1
                     yield runner, runners[runner]['args'], runners[runner]['kwargs']
 
+    def _done_callback(self, future):
+        """
+        Called by each done future as they return or raise.
+        """
+        future.end_time = time.time()
+        future.duration = future.end_time - future.start_time
+        # sort the results list in order of fastest to slowest
+        self.results = self.results.sort(key=lambda e: e.duration)
+
     def start(self):
         """
         Starts the race.    
@@ -120,8 +144,7 @@ class FunctionRacer():
         Waits for the first function that returns without raising an exception and
         returns its result.
         
-        If all function calls raise an Exception, returns AllFailedException containing
-        a list of all the Exceptions.
+        If all function calls raise an Exception, AllFailedException will be raised.
 
         If no function call finishes within `self.timeout` seconds, return TimeoutException,
         else wait indefinitely.
@@ -135,10 +158,15 @@ class FunctionRacer():
         executor = ThreadPoolExecutor(max_workers=self.get_contestant_count())
         for fn, args, kwargs in self._homogenised_contestants():       
             future = executor.submit(fn, *args, **kwargs)
+            future.start_time = time.time()
+            future.end_time = None
+            future.duration = None
+            future.add_done_callback(self._done_callback)
             future.__fname__ = fn.__name__
             future.__fargs__ = args
             future.__fkwargs__ = kwargs
             self.futures.append(future)
+        self.results = self.futures[:]
         # Gather results as they come in
         exceptions = []
         exception = None
