@@ -135,7 +135,7 @@ class FunctionRacer():
         future.end_time = time.time()
         future.duration = future.end_time - future.start_time
         # sort the results list in order of fastest to slowest
-        self.results = self.results.sort(key=lambda e: e.duration)
+        self.results.sort(key=lambda e: - 1/(e.duration or -1))
 
     def start(self):
         """
