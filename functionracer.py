@@ -1,4 +1,4 @@
-#!/usr/b
+#!/usr/bin/env python
 from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, ALL_COMPLETED, wait
 from concurrent.futures.thread import _python_exit
 import threading
@@ -85,7 +85,6 @@ class FunctionRacer():
     cleanup_wait = True
 
     def __init__(self, functions=[], timeout=None, cleanup_wait=True, cleanup_timeout=5):
-        assert(cleanup_timeout >= 0)
         self.timeout = timeout
         self.cleanup_timeout = cleanup_timeout
         self.set_cleanup_wait(cleanup_wait)
@@ -168,7 +167,6 @@ class FunctionRacer():
             self.futures.append(future)
         self.results = self.futures[:]
         # Gather results as they come in
-        exceptions = []
         exception = None
         done = False
         start_time = time.time()
@@ -182,7 +180,6 @@ class FunctionRacer():
                     self.logger.debug(f"We have a winner! Name: {f.__fname__}, args: {f.__fargs__}, kwargs: {f.__fkwargs__}")
                     done = True
                 except Exception as e:
-                    exceptions.append(e)
                     if running:
                         self.futures = list(running)
                     else:
@@ -196,7 +193,7 @@ class FunctionRacer():
             return result
         except NameError:
             if not exception:
-                exception = AllFailedException(exceptions)
+                exception = AllFailedException("All contestant functions returned an Exception")
         raise exception
 
     def is_running(self):
