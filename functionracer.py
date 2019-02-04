@@ -184,7 +184,6 @@ class FunctionRacer():
                         self.futures = list(running)
                     else:
                         done = True
-            self.logger.debug(f"self.timeout={self.timeout}, start_time={start_time}, current_time={time.time()} delta = {time.time() - start_time}")
             if self.timeout and time.time() - start_time >= self.timeout:
                 exception = TimeoutException(f"No functions returned within {self.timeout} seconds.")
                 done = True
@@ -236,3 +235,78 @@ class FunctionRacer():
         cleanall_thread = threading.Thread(target=cleanall, args=(self, cleanup_wait, cleanup_timeout))
         cleanall_thread.start()
 
+
+if __name__ == "__main__":
+    import random
+    import os
+    logging.getLogger().setLevel(logging.NOTSET)
+
+
+    ##############################
+    ## Some fake worker functions
+    ##############################
+
+    def phony_worker(t1, t2, exception_probability=0):
+        """
+        sleeps for random time between t2 - t1 seconds.
+        Raises Exception `exception_probability`*100% of the time
+        """
+        assert t2 >= t1
+        assert 0 <= exception_probability <= 1
+
+        sleeptime = random.randint(t1, t2)
+        #logging.info(f"Sleeping {sleeptime}s ({exception_probability*100}% chance of Exception)")
+        time.sleep(sleeptime)
+        if random.random() <= exception_probability:
+            logging.info(f"I am a contestant, pretending something went wrong and raising an Exception after {sleeptime} seconds.")
+            raise Exception("Phony exception")
+        return f"I'm a contestant and I pretended to do {sleeptime} seconds worth of work ;-)."
+
+    def fakefunction(*args, **kwargs):
+        return phonyworker(*args, **kwargs)
+
+
+    ##########################################
+    ## main: Configure and start a few races
+    ##########################################
+
+    if __name__ == "__main__":
+
+
+        def print_results(fr):
+            count = 1
+            for future in fr.results:
+                print("========", future.__fname__, f"(Place: {future.exception() and 'N/A' or count}) - Duration: {future.duration}s ({future.exception() and 'raised Exception' or 'returned ok'})")
+                if not future.exception():
+                    count += 1
+
+        #fr = FunctionRacer(functions=[(phonyworker, [1, 10], {'exception_probability': .7}, 3), ])
+        #fr = FunctionRacer(cleanup_wait=False)
+        fr = FunctionRacer(timeout=None, cleanup_wait=True, cleanup_timeout=None)
+
+        fr.add_function(phony_worker, args=[1, 10], kwargs={'exception_probability': .3}, count=3)
+        fr.add_function(fakefunction, args=[1, 10], kwargs={'exception_probability': .3}, count=3)
+        repeat_race = 3 # repeat the race 3 times
+        for i in range(repeat_race):
+            print(f"\n============================== New Race ({i+1})! ==============================")
+            print("Contestant count after adding them all is:", fr.get_contestant_count())
+            start_time = time.time()
+            print(f"Starting race!")
+            try:
+                result = fr.start()
+                print(f"Winner ran in {time.time() - start_time} seconds. Result returned was: {result}")
+            except (AllFailedException, TimeoutException) as e:
+                print(f"Sorry no winners (race duration: {time.time() - start_time} seconds):", e)
+            if i == repeat_race - 1:
+                print("That was the last race, forcibly exiting (not waiting for non-winners to return) by calling os._exit(0)")
+                os._exit(0)
+            else:
+                print("Awaiting contestant functions to finish (unless we set cleanup_wait=False)...")
+                while fr.is_running():
+                    print(" ############### in-progress results ###############")
+                    print_results(fr)
+                    time.sleep(1)
+                print("All contestant functions are returned (or we skipped the check with cleanup_wait=False), the race is over.")
+            # Gather some stats
+            print(" ############### final results ###############")
+            print_results(fr)
