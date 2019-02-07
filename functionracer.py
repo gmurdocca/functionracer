@@ -87,10 +87,10 @@ class FunctionRacer():
     def __init__(self, functions=[], timeout=None, cleanup_wait=True, cleanup_timeout=5):
         self.timeout = timeout
         self.cleanup_timeout = cleanup_timeout
-        self.set_cleanup_wait(cleanup_wait)
         self.logger = logging.getLogger()
         for function_spec in functions:
             self.add_function(*function_spec)
+        self.set_cleanup_wait(cleanup_wait)
 
     def set_cleanup_wait(self, desired_state):
         cls = self.__class__
@@ -270,43 +270,38 @@ if __name__ == "__main__":
     ## main: Configure and start a few races
     ##########################################
 
-    if __name__ == "__main__":
+    #fr = FunctionRacer(functions=[(phonyworker, [1, 10], {'exception_probability': .7}, 3), ])
+    fr = FunctionRacer(cleanup_wait=False)
+    #fr = FunctionRacer(timeout=3, cleanup_wait=True, cleanup_timeout=5)
 
+    fr.add_function(phony_worker, args=[1, 10], kwargs={'exception_probability': .3}, count=3)
+    fr.add_function(fakefunction, args=[1, 10], kwargs={'exception_probability': .3}, count=3)
+    repeat_race = 3 # repeat the race 3 times
+    for i in range(repeat_race):
+        print(f"\n============================== New Race ({i+1})! ==============================")
+        print("Contestant count after adding them all is:", fr.get_contestant_count())
+        start_time = time.time()
+        print(f"Starting race!")
+        try:
+            result = fr.start()
+            print(f"Winner ran in {time.time() - start_time} seconds. Result returned was: {result}")
+        except (AllFailedException, TimeoutException) as e:
+            print(f"Sorry no winners (race duration: {time.time() - start_time} seconds):", e)
+        if i == repeat_race - 1:
+            print("That was the last race, forcibly exiting (not waiting for non-winners to return) by calling os._exit(0)")
+            os._exit(0)
+        else:
+            print("Awaiting contestant functions to finish (unless we set cleanup_wait=False)...")
+            while fr.is_running():
+                pass
+            if fr.cleanup_wait:
+                # XXX Note we're calling future.exception() for each exception in the below for block. timeout=None is passed to it by default. As such, each future
+                # will block until it returns according to the doco here: https://docs.python.org/3/library/concurrent.futures.html#future-objects
+                print("############### results ###############")
+                count = 1
+                for future in fr.results:
+                    print("*** ", future.__fname__, f"(Place: {future.exception() and 'N/A' or count}) - Duration: {future.duration}s ({future.exception() and 'raised Exception' or 'returned ok'})")
+                    if not future.exception():
+                        count += 1
+            print("RACE OVER: either all contestant functions are returned, or we skipped the check with cleanup_wait=False.")
 
-        def print_results(fr):
-            count = 1
-            for future in fr.results:
-                print("========", future.__fname__, f"(Place: {future.exception() and 'N/A' or count}) - Duration: {future.duration}s ({future.exception() and 'raised Exception' or 'returned ok'})")
-                if not future.exception():
-                    count += 1
-
-        #fr = FunctionRacer(functions=[(phonyworker, [1, 10], {'exception_probability': .7}, 3), ])
-        #fr = FunctionRacer(cleanup_wait=False)
-        fr = FunctionRacer(timeout=None, cleanup_wait=True, cleanup_timeout=None)
-
-        fr.add_function(phony_worker, args=[1, 10], kwargs={'exception_probability': .3}, count=3)
-        fr.add_function(fakefunction, args=[1, 10], kwargs={'exception_probability': .3}, count=3)
-        repeat_race = 3 # repeat the race 3 times
-        for i in range(repeat_race):
-            print(f"\n============================== New Race ({i+1})! ==============================")
-            print("Contestant count after adding them all is:", fr.get_contestant_count())
-            start_time = time.time()
-            print(f"Starting race!")
-            try:
-                result = fr.start()
-                print(f"Winner ran in {time.time() - start_time} seconds. Result returned was: {result}")
-            except (AllFailedException, TimeoutException) as e:
-                print(f"Sorry no winners (race duration: {time.time() - start_time} seconds):", e)
-            if i == repeat_race - 1:
-                print("That was the last race, forcibly exiting (not waiting for non-winners to return) by calling os._exit(0)")
-                os._exit(0)
-            else:
-                print("Awaiting contestant functions to finish (unless we set cleanup_wait=False)...")
-                while fr.is_running():
-                    print(" ############### in-progress results ###############")
-                    print_results(fr)
-                    time.sleep(1)
-                print("All contestant functions are returned (or we skipped the check with cleanup_wait=False), the race is over.")
-            # Gather some stats
-            print(" ############### final results ###############")
-            print_results(fr)
