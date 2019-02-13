@@ -78,7 +78,7 @@ class FunctionRacer():
     https://docs.python.org/2/library/os.html#os._exit
     """
 
-    contestants = {}
+    contestants = []
     futures = []
     results = []
     cleaning = False
@@ -108,24 +108,22 @@ class FunctionRacer():
         Adds a new contestant function that will compete for shortest runtime.
         `count` number of functions will be added to the start gates in this race.
         """
-        self.contestants[fn] = {'args': args, 'kwargs': kwargs, 'count': count}
+        self.contestants.append({'function': fn, 'args': args, 'kwargs': kwargs, 'count': count})
 
-    def get_contestant_count(self, contestants=None):
-        if not contestants:
-            contestants = self.contestants
-        return sum([contestants[contestant]['count'] for contestant in contestants])
+    def get_contestant_count(self):
+        return sum([contestant['count'] for contestant in self.contestants])
 
     def _homogenised_contestants(self):
         """
         A generator that yields a homogenous mix of contestants, used for ordering
         them at the start blocks to ensure as fair a start as possible.
         """
-        runners = copy.deepcopy(self.contestants)
-        while self.get_contestant_count(contestants=runners) > 0:
-            for runner in runners:
-                if runners[runner]['count']:
-                    runners[runner]['count'] -= 1
-                    yield runner, runners[runner]['args'], runners[runner]['kwargs']
+        counts = [c['count'] for c in self.contestants]
+        while sum(counts):
+            for index, contestant in enumerate(self.contestants):
+                if counts[index]:
+                    counts[index] -= 1
+                    yield contestant['function'], contestant['args'], contestant['kwargs']
 
     def _done_callback(self, future):
         """
@@ -270,12 +268,12 @@ if __name__ == "__main__":
     ## main: Configure and start a few races
     ##########################################
 
-    #fr = FunctionRacer(functions=[(phonyworker, [1, 10], {'exception_probability': .7}, 3), ])
+    #fr = FunctionRacer(functions=[(phonyworker, [3, 10], {'exception_probability': .3}, 3), ])
     fr = FunctionRacer(cleanup_wait=False)
-    #fr = FunctionRacer(timeout=3, cleanup_wait=True, cleanup_timeout=5)
+    #fr = FunctionRacer(timeout=None, cleanup_wait=True, cleanup_timeout=None)
 
-    fr.add_function(phony_worker, args=[1, 10], kwargs={'exception_probability': .3}, count=3)
-    fr.add_function(fakefunction, args=[1, 10], kwargs={'exception_probability': .3}, count=3)
+    fr.add_function(phony_worker, args=[1, 10], kwargs={'exception_probability': .03}, count=3)
+    fr.add_function(fakefunction, args=[1, 10], kwargs={'exception_probability': .1}, count=30)
     repeat_race = 3 # repeat the race 3 times
     for i in range(repeat_race):
         print(f"\n============================== New Race ({i+1})! ==============================")
