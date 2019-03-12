@@ -78,13 +78,13 @@ class FunctionRacer():
     https://docs.python.org/2/library/os.html#os._exit
     """
 
-    contestants = []
-    futures = []
-    results = []
-    cleaning = False
     cleanup_wait = True
 
     def __init__(self, functions=[], timeout=None, cleanup_wait=True, cleanup_timeout=5):
+        self.contestants = []
+        self.futures = []
+        self.results = []
+        self.cleaning = False        
         self.timeout = timeout
         self.cleanup_timeout = cleanup_timeout
         self.logger = logging.getLogger()
@@ -122,6 +122,7 @@ class FunctionRacer():
         while sum(counts):
             for index, contestant in enumerate(self.contestants):
                 if counts[index]:
+                    self.logger.debug(f"counts: {counts}")
                     counts[index] -= 1
                     yield contestant['function'], contestant['args'], contestant['kwargs']
 
@@ -233,7 +234,6 @@ class FunctionRacer():
         cleanall_thread = threading.Thread(target=cleanall, args=(self, cleanup_wait, cleanup_timeout))
         cleanall_thread.start()
 
-
 if __name__ == "__main__":
     import random
     import os
@@ -269,11 +269,13 @@ if __name__ == "__main__":
     ##########################################
 
     #fr = FunctionRacer(functions=[(phonyworker, [3, 10], {'exception_probability': .3}, 3), ])
-    fr = FunctionRacer(cleanup_wait=False)
-    #fr = FunctionRacer(timeout=None, cleanup_wait=True, cleanup_timeout=None)
+    #fr = FunctionRacer(cleanup_wait=False)
+    fr = FunctionRacer()
 
-    fr.add_function(phony_worker, args=[1, 10], kwargs={'exception_probability': .03}, count=3)
-    fr.add_function(fakefunction, args=[1, 10], kwargs={'exception_probability': .1}, count=30)
+    fr.add_function(phony_worker, args=[1, 10], kwargs={'exception_probability': .2}, count=2)
+    fr.add_function(fakefunction, args=[1, 10], kwargs={'exception_probability': .2}, count=2)
+#    fr.add_function(phony_worker, args=[1, 10], kwargs={'exception_probability': .2}, count=5)
+
     repeat_race = 3 # repeat the race 3 times
     for i in range(repeat_race):
         print(f"\n============================== New Race ({i+1})! ==============================")
